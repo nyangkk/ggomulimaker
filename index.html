@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ontogeny</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f6f4;--fg:#1d1d22;--dim:rgba(29,29,34,.55);--line:rgba(29,29,34,.26);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--bg);color:var(--fg);transition:background .4s,color .4s;font-family:'IBM Plex Mono','Apple SD Gothic Neo','Noto Sans KR',ui-monospace,monospace;overflow:hidden}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+#c:active{cursor:grabbing}
+.top{position:fixed;left:20px;top:calc(18px + env(safe-area-inset-top,0px));display:flex;align-items:center;gap:8px;z-index:3}
+.dot{width:40px;height:40px;border-radius:50%;border:1px solid var(--fg);display:grid;place-items:center;font:500 13px 'IBM Plex Mono',monospace;background:transparent;color:var(--fg);cursor:pointer;transition:background .3s,color .3s}
+.dot.act{background:var(--fg);color:var(--bg)}
+.dot:focus-visible,button:focus-visible{outline:2px solid var(--fg);outline-offset:3px}
+#lab{margin-left:6px;font-size:12px;letter-spacing:.04em}
+.panel{position:fixed;left:20px;top:calc(72px + env(safe-area-inset-top,0px));width:min(290px,calc(100vw - 40px));padding:20px 18px 4px;border:1px solid var(--line);border-radius:18px;background:color-mix(in srgb,var(--bg) 55%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);z-index:2;opacity:0;transform:translateY(-6px);pointer-events:none;transition:opacity .3s,transform .3s}
+.panel.open{opacity:1;transform:none;pointer-events:auto}
+.panel label{display:grid;grid-template-columns:1fr auto;row-gap:6px;margin-bottom:18px;font-size:12px}
+.panel i{font-style:normal;color:var(--dim);margin-left:8px;font-size:11px}
+.panel b{font-weight:400;color:var(--dim)}
+.panel input{grid-column:1/3}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:16px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:1px;background:var(--line)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;background:var(--fg);margin-top:-5px}
+input[type=range]::-moz-range-track{height:1px;background:var(--line)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border:0;border-radius:50%;background:var(--fg)}
+.right{position:fixed;right:20px;top:calc(26px + env(safe-area-inset-top,0px));display:flex;gap:18px;align-items:center;font-size:12px;z-index:3;color:var(--dim)}
+.right button{font:inherit;color:var(--fg);background:none;border:0;cursor:pointer;text-decoration:underline;text-underline-offset:4px}
+.bar{position:fixed;left:50%;bottom:calc(28px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:min(440px,calc(100vw - 40px));display:grid;grid-template-columns:64px 1fr 64px;gap:14px;align-items:center;font-size:12px;z-index:3}
+.bar span:last-child{text-align:right;color:var(--dim)}
+.hint{position:fixed;left:0;right:0;bottom:calc(64px + env(safe-area-inset-bottom,0px));text-align:center;font-size:11px;color:var(--dim);z-index:1;pointer-events:none}
+#err{position:fixed;inset:0;display:none;place-items:center;font-size:13px;color:var(--dim)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="err">이 브라우저에서는 WebGL을 사용할 수 없습니다.</div>
+
+<div class="top">
+<button class="dot act" data-p="pe" aria-label="Environment">E</button>
+<button class="dot" data-p="pb" aria-label="Body">B</button>
+<span id="lab">Ontogeny</span>
+</div>
+
+<div class="panel" id="pe"></div>
+<div class="panel" id="pb"></div>
+
+<div class="right"><button id="rs">Reset</button></div>
+
+
+<div class="bar"><span id="wk">week 03</span><input type="range" min="0" max="100" data-k="g" aria-label="Growth"><span>growth</span></div>
+<div class="hint">드래그 / 마우스 휠로 성장</div>
+
+<script id="fs" type="x-shader/x-fragment">
+precision highp float;
+uniform vec2 R;
+uniform float T,RAD,POL,MET,HEAT,TOX;
+uniform vec2 ROT;
+uniform vec3 PULL;
+uniform vec4 PA[40];
+uniform vec4 HD[5];
+uniform vec4 SP[24];
+uniform vec4 VL;
+uniform vec4 EY[4];
+
+mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
+float smin(float a,float b,float k){float h=max(k-abs(a-b),0.)/k;return min(a,b)-h*h*k*.25;}
+float smax(float a,float b,float k){return -smin(-a,-b,k);}
+float hash(vec3 p){p=fract(p*.3183099+.1);p*=17.;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
+float noise(vec3 x){
+ vec3 i=floor(x),f=fract(x);f=f*f*(3.-2.*f);
+ return mix(mix(mix(hash(i),hash(i+vec3(1.,0.,0.)),f.x),mix(hash(i+vec3(0.,1.,0.)),hash(i+vec3(1.,1.,0.)),f.x),f.y),
+ mix(mix(hash(i+vec3(0.,0.,1.)),hash(i+vec3(1.,0.,1.)),f.x),mix(hash(i+vec3(0.,1.,1.)),hash(i+vec3(1.,1.,1.)),f.x),f.y),f.z);
+}
+float cone(vec3 p,vec3 a,vec3 b,float ra,float rb){
+ vec3 pa=p-a,ba=b-a;
+ float h=clamp(dot(pa,ba)/dot(ba,ba),0.,1.);
+ return length(pa-ba*h)-mix(ra,rb,h);
+}
+float map(vec3 p){
+ vec3 q=p;
+ q.xz*=rot(ROT.x);
+ q.yz*=rot(ROT.y);
+ float lq=length(q);
+ if(lq>2.4)return lq-2.1;
+ float d=1e5;
+ for(int i=0;i<40;i++)d=smin(d,length(q-PA[i].xyz)-PA[i].w,.1);
+ d=smin(d,length(q-HD[0].xyz)-HD[0].w,.2);
+ d=smin(d,length(q-HD[1].xyz)-HD[1].w,.22);
+ d=smin(d,length(q-HD[2].xyz)-HD[2].w,.16);
+ for(int i=3;i<5;i++)d=smin(d,length(q-HD[i].xyz)-HD[i].w,.2);
+ for(int i=0;i<12;i++)d=smin(d,cone(q,SP[i*2].xyz,SP[i*2+1].xyz,SP[i*2].w,SP[i*2+1].w),.05);
+ for(int i=0;i<4;i++){
+  if(EY[i].w>.005){
+   vec3 e=normalize(EY[i].xyz-HD[0].xyz);
+   d=smax(d,-(length(q-EY[i].xyz)-EY[i].w),.04);
+   d=smin(d,length(q-(EY[i].xyz-e*EY[i].w*.35))-EY[i].w*.7,.12);
+  }
+ }
+ 
+ vec3 vq=q-VL.xyz;
+ float va=atan(vq.y,vq.x);
+ float vd=length(vq.xy);
+ vq.z+=.05*sin(va*6.+vd*4.)*smoothstep(0.,VL.w,vd);
+ float vr=VL.w*(1.+.16*sin(va*5.+1.)+.08*sin(va*9.));
+ d=smin(d,(length(vec3(vq.xy,vq.z*5.))-vr)/4.,.1);
+ d+=(noise(q*3.+T*.05)-.5)*.22*RAD;
+ d+=sin(q.x*11.)*sin(q.y*9.)*sin(q.z*12.)*.012*POL;
+ d+=(noise(q*9.)-.5)*.008;
+ if(PULL.z>.01)d=smin(d,length(p-vec3(PULL.xy,0.))-(.08+.28*PULL.z),.1+.4*PULL.z);
+ return d*.8;
+}
+vec3 nrm(vec3 p){
+ vec2 e=vec2(.003,-.003);
+ return normalize(e.xyy*map(p+e.xyy)+e.yyx*map(p+e.yyx)+e.yxy*map(p+e.yxy)+e.xxx*map(p+e.xxx));
+}
+float eyeMask(vec3 q){
+ float m=0.;
+ for(int i=0;i<4;i++){
+  if(EY[i].w>.005)m=max(m,smoothstep(EY[i].w*.8,EY[i].w*.5,length(q-EY[i].xyz)));
+ }
+ return m;
+}
+void main(){
+ vec2 uv=(gl_FragCoord.xy-.5*R)/min(R.x,R.y)*2.;
+ vec3 ro=vec3(0.,.25,4.4);
+ vec3 rd=normalize(vec3(uv,-2.6));
+ float t=0.,md=10.;
+ bool hit=false;
+ for(int i=0;i<90;i++){
+  float d=map(ro+rd*t);
+  md=min(md,d);
+  if(d<.002){hit=true;break;}
+  t+=d;
+  if(t>8.)break;
+ }
+ vec3 col=vec3(.965,.965,.957);
+ col=mix(col,vec3(.55,1.,.7),exp(-max(md,0.)*6.)*.5*RAD);
+ if(hit){
+  vec3 pos=ro+rd*t;
+  vec3 n=nrm(pos);
+  vec3 q=pos;
+  q.xz*=rot(ROT.x);
+  q.yz*=rot(ROT.y);
+  float sss=0.;
+  for(int i=1;i<=4;i++){
+   float h=float(i)*.06;
+   sss+=clamp(-map(pos-n*h)/(h*.8),0.,1.);
+  }
+  sss/=4.;
+  float hw=smoothstep(.12,-.12,length(q-HD[0].xyz)-HD[0].w*1.2);
+  hw=max(hw,smoothstep(.12,-.12,length(q-HD[1].xyz)-HD[1].w*1.1));
+  vec3 shell=vec3(.78,.84,.97);
+  vec3 flesh=vec3(.9,.86,.96);
+  float tail=smoothstep(.3,-.2,q.y);
+  float pk=(1.-hw)*(.5+.4*tail);
+  vec3 base=mix(shell,flesh,pk);
+  base=mix(base,flesh,(1.-sss)*.3*(1.-hw));
+  float glass=smoothstep(.55,.15,sss);
+  float bd=9.,kk=0.;
+  for(int i=0;i<40;i++){float dd=length(q-PA[i].xyz)-PA[i].w;if(dd<bd){bd=dd;kk=float(i);}}
+  base=mix(base,vec3(.8,.78,.95),mod(kk,2.)*.25*(1.-hw)*(1.-glass));
+  base=mix(base,vec3(.82,.78,.95),smoothstep(.2,-.9,q.y)*.5*(1.-hw));
+  base=mix(base,vec3(.66,.74,.9),glass*.8);
+  float vn=abs(noise(q*6.+3.)-.5);
+  float vn2=abs(noise(q*14.+7.)-.5);
+  float vein=(smoothstep(.04,.0,vn)*.8+smoothstep(.03,.0,vn2)*.4)*smoothstep(.3,.65,noise(q*2.+1.))*(.35+.2*(1.-hw)+.5*glass);
+  base=mix(base,vec3(.45,.5,.85),clamp(vein,0.,1.)*.32);
+  base=mix(base,vec3(.52,.47,.34),POL*.55);
+  base=mix(base,vec3(.42,.5,.62),MET*.6);
+  base=mix(base,vec3(.6,.8,.32),TOX*.5);
+  vec3 L=normalize(vec3(-.55,.7,.65));
+  float wrap=clamp((dot(n,L)+.5)/1.5,0.,1.);
+  float fre=pow(1.-clamp(dot(n,-rd),0.,1.),3.);
+  vec3 c=base*(.5+.5*wrap)*mix(vec3(.74,.78,.94),vec3(1.),wrap);
+  c=mix(c,c*vec3(.66,.72,.9),fre*.9);
+  c+=vec3(.75,.8,1.)*(1.-sss)*.1*(1.-hw);
+  float sp=pow(max(dot(n,normalize(L-rd)),0.),40.)*(.45+MET);
+  c+=sp;
+  c=mix(c,vec3(.5,1.,.62),clamp(RAD*(.12+fre)*.7*(.5+.5*noise(q*7.+T*.5)),0.,1.));
+  {
+   vec3 rq=rd;
+   rq.xz*=rot(ROT.x);
+   rq.yz*=rot(ROT.y);
+   float ins=0.;
+   for(int i=1;i<=10;i++)ins+=smoothstep(.03,.12,-map(pos+rd*float(i)*.045));
+   ins/=10.;
+   vec3 ip=q+rq*.25;
+   vec3 core=mix(vec3(1.,1.,1.),mix(vec3(.54,.52,.95),vec3(.76,.66,.94),smoothstep(.35,.7,noise(ip*3.5+2.))),HEAT);
+   core*=mix(.98+.04*noise(ip*9.),.8+.4*noise(ip*9.),HEAT);
+   float tp=(.68+.27*HEAT)*(1.-fre*.35);
+   c=mix(c,mix(vec3(.93,.95,1.),core,smoothstep(0.,.35,ins)),tp);
+   c+=sp*(.15+.45*HEAT);
+  }
+  float em=eyeMask(q);
+  c=mix(c,vec3(.03,.02,.06)+sp*1.2,em*.95);
+  col=c;
+ }
+ col+=(hash(vec3(gl_FragCoord.xy,fract(T)*50.))-.5)*.025;
+ gl_FragColor=vec4(col,1.);
+}
+</script>
+
+<script>
+const D={g:0,curl:.6,cran:.5,veil:.5,spine:.4,st:.2,rad:0,pol:0,met:0,heat:0,tox:0};
+const S={...D},V={...D};
+const L={rad:['Radiation','방사능'],pol:['Air pollution','대기오염'],met:['Heavy metals','중금속'],heat:['Heat','고온'],tox:['Toxins','독성물질'],curl:['Curl','굴곡'],cran:['Cranium','두개골'],veil:['Veil','피막'],spine:['Spines','등 돌기'],st:['Stretch','신장'],limb:['Limb buds','사지 싹']};
+const mk=(id,keys)=>{document.getElementById(id).innerHTML=keys.map(k=>`<label><span>${L[k][0]}<i>${L[k][1]}</i></span><b id="v-${k}"></b><input type="range" min="0" max="100" data-k="${k}"></label>`).join('')};
+mk('pe',['rad','pol','met','heat','tox']);
+mk('pb',['curl','cran','veil','spine','st']);
+
+function sync(){
+ document.querySelectorAll('input[data-k]').forEach(i=>{
+  const k=i.dataset.k;
+  i.value=Math.round(S[k]*100);
+  const v=document.getElementById('v-'+k);
+  if(v)v.textContent=i.value;
+ });
+}
+sync();
+document.addEventListener('input',e=>{
+ const k=e.target.dataset&&e.target.dataset.k;
+ if(k){
+  S[k]=e.target.value/100;
+  const v=document.getElementById('v-'+k);
+  if(v)v.textContent=e.target.value;
+ }
+});
+
+const lab=document.getElementById('lab');
+const names={pe:'Environment',pb:'Body'};
+document.querySelectorAll('.dot').forEach(b=>{
+ b.onclick=()=>{
+  const k=b.dataset.p,p=document.getElementById(k),was=p.classList.contains('open');
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('open'));
+  if(!was)p.classList.add('open');
+  document.querySelectorAll('.dot').forEach(x=>x.classList.toggle('act',x===b));
+  lab.textContent=names[k];
+ };
+});
+document.getElementById('rs').onclick=()=>{Object.assign(S,D);sync()};
+
+
+const c=document.getElementById('c');
+const gl=c.getContext('webgl',{antialias:false});
+if(!gl){document.getElementById('err').style.display='grid'}
+const mkSh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o};
+const pr=gl.createProgram();
+gl.attachShader(pr,mkSh(gl.VERTEX_SHADER,'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}'));
+gl.attachShader(pr,mkSh(gl.FRAGMENT_SHADER,document.getElementById('fs').textContent));
+gl.linkProgram(pr);
+gl.useProgram(pr);
+const buf=gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const al=gl.getAttribLocation(pr,'a');
+gl.enableVertexAttribArray(al);
+gl.vertexAttribPointer(al,2,gl.FLOAT,false,0,0);
+const U={};
+['R','T','ROT','PULL','RAD','POL','MET','HEAT','TOX','PA','HD','EY','SP','VL'].forEach(n=>{U[n]=gl.getUniformLocation(pr,n)});
+
+function size(){
+ const d=Math.min(window.devicePixelRatio||1,1.5,Math.sqrt(2.2e6/(innerWidth*innerHeight)));
+ c.width=Math.round(innerWidth*d);
+ c.height=Math.round(innerHeight*d);
+ gl.viewport(0,0,c.width,c.height);
+}
+size();
+addEventListener('resize',size);
+
+const N=40;
+const PA=new Float32Array(N*4),HD=new Float32Array(20),EY=new Float32Array(16),SP=new Float32Array(96),VL=new Float32Array(4);
+const dirs=[[.4,.05,.9],[.4,.05,-.9],[.9,-.3,.2],[.2,.7,.65]];
+
+function geo(tm){
+ const G=V.g,K=.94,s=(.75+.25*G)*K,A=1.6+G*2.4+V.curl*9,br=1+.015*Math.sin(tm*2.2);
+ const pt=u=>{
+  const a=1.5708+u*A+.05*Math.sin(tm*1.4-u*5)*u,r=.85*(1-.86*u);
+  const sy=Math.sin(a)*r*(1+.3*V.st);
+  return [Math.cos(a)*r*s*(1-.2*V.st),(sy*(1-.22*Math.min(1,Math.max(0,-sy/.4)))-.25)*s,(-.3*u+.25*V.st*Math.sin(u*7))*s];
+ };
+ const tr=u=>((.26*Math.pow(1-u,.9)+.03)*(.92+.08*Math.min(1,u/.12))+.07*Math.exp(-Math.pow((u-.3)/.16,2)))*s*(1-.25*V.pol)*(1+.12*V.tox);
+ for(let i=0;i<N;i++){
+  const u=i/(N-1),p=pt(u);
+  PA.set([p[0],p[1],p[2],tr(u)*br*(1+.1*(i%2))],i*4);
+ }
+ const p0=pt(0),hc=[p0[0]+.22*s,p0[1]+.2*s,.05*s];
+ const hr=(.36+.1*V.cran+.05*V.tox)*(.82+.18*G)*br*K;
+ const t0=tr(0),n1=[p0[0]+(hc[0]-p0[0])*.35,p0[1]+(hc[1]-p0[1])*.35,hc[2]*.35],n2=[p0[0]+(hc[0]-p0[0])*.7,p0[1]+(hc[1]-p0[1])*.7,hc[2]*.7];
+ HD.set([hc[0],hc[1],hc[2],hr,hc[0]-.59*hr,hc[1]+.38*hr,hc[2],hr*(.56+.35*V.cran)*1.2,hc[0]+.57*hr,hc[1]-.19*hr,hc[2],hr*.30,n1[0],n1[1],n1[2],t0+(hr*.85-t0)*.3,n2[0],n2[1],n2[2],t0+(hr*.85-t0)*.65]);
+ VL.set([hc[0]-.55*hr,hc[1]+.3*hr,hc[2]-.2*hr,hr*(.35+1.5*V.veil)]);
+ for(let i=0;i<12;i++){
+  const u=.1+i*.062,p=pt(u),q2=pt(u+.03),r=tr(u),nx=p[0],ny=p[1]+.25*s,l=Math.hypot(nx,ny)||1;
+  const sr=(.04+.025*(1-u))*s*(.6+.4*G)*(1+.8*V.rad),len=(.04+.6*V.spine)*s*(1-.6*u)*(.7+.3*(i%2))*(1+.5*V.rad);
+  const bx=p[0]+nx/l*(r+sr*.2),by=p[1]+ny/l*(r+sr*.2),tx=q2[0]-p[0],tz=q2[1]-p[1],tl=Math.hypot(tx,tz)||1;
+  SP.set([bx,by,p[2],sr,bx+nx/l*len+tx/tl*len*.35,by+ny/l*len+tz/tl*len*.35,p[2],sr*.3],i*8);
+ }
+ const ecf=2+V.rad*2.99,er=hr*.42*(1+.35*V.tox);
+ dirs.forEach((d,i)=>{
+  const l=Math.hypot(d[0],d[1],d[2]),k=Math.max(0,Math.min(1,ecf-i));
+  EY.set([hc[0]+d[0]/l*hr*.96,hc[1]+d[1]/l*hr*.96,hc[2]+d[2]/l*hr*.96,er*k],i*4);
+ });
+ 
+}
+
+let down=false,ps=0,px=0,py=0,yaw=0,pit=0,ty=0,tp=0,last=0;
+
+function point(e){
+ const d=c.width/innerWidth,m=Math.min(c.width,c.height);
+ px=((e.clientX*d-c.width/2)/m*2)*1.692;
+ py=((c.height/2-e.clientY*d)/m*2)*1.692+.25;
+}
+c.addEventListener('pointerdown',e=>{down=true;point(e);c.setPointerCapture(e.pointerId)});
+addEventListener('pointermove',e=>{
+ ty=(e.clientX/innerWidth-.5)*.8;
+ tp=(e.clientY/innerHeight-.5)*.4;
+ if(down)point(e);
+});
+addEventListener('pointerup',()=>{down=false});
+addEventListener('pointercancel',()=>{down=false});
+addEventListener('wheel',e=>{
+ S.g=Math.max(0,Math.min(1,S.g-e.deltaY*.0007));
+ sync();
+ e.preventDefault();
+},{passive:false});
+
+const wk=document.getElementById('wk');
+
+function frame(now){
+ const tm=now/1000,dt=Math.min(.05,tm-last);
+ last=tm;
+ for(const k in S)V[k]+=(S[k]-V[k])*Math.min(1,dt*5);
+ ps=down?Math.min(1,ps+dt*.9):ps*Math.exp(-dt*3);
+ if(!down&&ps<.01)ps=0;
+ yaw+=(ty+.18*Math.sin(tm*.35)-yaw)*Math.min(1,dt*2);
+ pit+=(tp-pit)*Math.min(1,dt*2);
+ geo(tm);
+ gl.uniform2f(U.R,c.width,c.height);
+ gl.uniform1f(U.T,tm);
+ gl.uniform2f(U.ROT,yaw,pit);
+ gl.uniform3f(U.PULL,px,py,ps);
+ gl.uniform1f(U.RAD,V.rad);
+ gl.uniform1f(U.POL,V.pol);
+ gl.uniform1f(U.MET,V.met);
+ gl.uniform1f(U.HEAT,V.heat);
+ gl.uniform1f(U.TOX,V.tox);
+ gl.uniform4fv(U.PA,PA);
+ gl.uniform4fv(U.HD,HD);
+ gl.uniform4fv(U.EY,EY);
+ gl.uniform4fv(U.SP,SP);
+ gl.uniform4fv(U.VL,VL);
+ gl.drawArrays(gl.TRIANGLES,0,3);
+ wk.textContent='week '+String(Math.round(3+V.g*9)).padStart(2,'0');
+ 
+ requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
